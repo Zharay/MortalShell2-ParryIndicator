@@ -53,7 +53,7 @@ local activeDangers = {}
 local lastMontage = {}
 local castDelay = nil
 local guardWindow = nil
-local EnsureTimings = nil
+local ResolveSealTimings = nil
 local socketTarget = nil
 local noneSocket = nil
 
@@ -67,9 +67,7 @@ end
 
 local function CalcParryWindow(self)
     if castDelay == nil or guardWindow == nil then
-        if not (EnsureTimings and EnsureTimings()) then
-            return
-        end
+        return
     end
 
     local invoker = self:get()
@@ -229,10 +227,10 @@ local function ParryIndicatorHook()
         "/Game/Sparta/Core/Effects/GE_ActiveBlock_PerfectBlock.GE_ActiveBlock_PerfectBlock_C")
     if pfb_2 then
         print(
-            string.format("PerfectBlock.DurationMagnitude: %f\n", pfb_2.DurationMagnitude.ScalableFloatMagnitude.Value))
+            string.format("[ParryIndicator] PerfectBlock.DurationMagnitude: %f\n", pfb_2.DurationMagnitude.ScalableFloatMagnitude.Value))
         blockDurationMagnitude = pfb_2.DurationMagnitude.ScalableFloatMagnitude.Value
     else
-        print("Can't get PerfectBlock.DurationMagnitude: " .. tostring(pfbErr_2))
+        print("[ParryIndicator] Can't get PerfectBlock.DurationMagnitude: " .. tostring(pfbErr_2))
         blockDurationMagnitude = nil
     end
 
@@ -240,10 +238,10 @@ local function ParryIndicatorHook()
         "/Game/Sparta/Core/Characters/Player/Common/Abilities/StoneForm/GA_Harden_Original.GA_Harden_Original",
         "/Game/Sparta/Core/Characters/Player/Common/Abilities/StoneForm/GA_Harden_Original.GA_Harden_Original_C")
     if hardenBl then
-        print(string.format("HardenBlock.PerfectStoneFormDuration: %f\n", hardenBl.PerfectStoneFormDuration))
+        print(string.format("[ParryIndicator] HardenBlock.PerfectStoneFormDuration: %f\n", hardenBl.PerfectStoneFormDuration))
         hardenPerfectStoneFormDuration = hardenBl.PerfectStoneFormDuration
     else
-        print("Can't get HardenBlock.PerfectStoneFormDuration: " .. tostring(hardenBlErr))
+        print("[ParryIndicator] Can't get HardenBlock.PerfectStoneFormDuration: " .. tostring(hardenBlErr))
         hardenPerfectStoneFormDuration = nil
     end
 
@@ -255,7 +253,7 @@ local function ParryIndicatorHook()
 
     local montage = StaticFindObject(montage_path_1)
     if not is_valid(montage) then
-        print("Parry montage unavailable: " .. montage_path_1)
+        print("[ParryIndicator] Parry montage unavailable: " .. montage_path_1)
     else
         local parry, parryErr = pcall(function()
             montage.Notifies:ForEach(function(_, element)
@@ -270,12 +268,12 @@ local function ParryIndicatorHook()
         end)
 
         if not parry then
-            print("Can't get Parry.LinkValue & Parry.Duration: " .. tostring(parryErr))
+            print("[ParryIndicator] Can't get Parry.LinkValue & Parry.Duration: " .. tostring(parryErr))
             parryLinkValue = nil
             parryDuration = nil
         else
-            print(string.format("Parry.LinkValue: %f\n", parryLinkValue))
-            print(string.format("Parry.Duration: %f\n", parryDuration))
+            print(string.format("[ParryIndicator] Parry.LinkValue: %f\n", parryLinkValue))
+            print(string.format("[ParryIndicator] Parry.Duration: %f\n", parryDuration))
         end
     end
 
@@ -288,7 +286,7 @@ local function ParryIndicatorHook()
     if ok and p ~= nil then
         preId = p
         postId = q
-        print(string.format("Load ParryIndicator successfully! preId: %d | postId: %d\n", preId, postId))
+        print(string.format("[ParryIndicator] Load ParryIndicator successfully! preId: %d | postId: %d\n", preId, postId))
 
         local dsOk, dsP, dsQ = pcall(function()
             return RegisterHook(
@@ -303,7 +301,7 @@ local function ParryIndicatorHook()
         if dsOk and dsP ~= nil then
             dangerStartPreId = dsP
             dangerStartPostId = dsQ
-            print(string.format("Hooked OnDangerStart: %d | %d\n", dangerStartPreId, dangerStartPostId))
+            print(string.format("[ParryIndicator] Hooked OnDangerStart: %d | %d\n", dangerStartPreId, dangerStartPostId))
         end
 
         -- NotifyEnd intentionally does not clear activeDangers: the flag stays latched for the rest of the montage's playback.
@@ -315,7 +313,7 @@ local function ParryIndicatorHook()
         if deOk and deP ~= nil then
             dangerEndPreId = deP
             dangerEndPostId = deQ
-            print(string.format("Hooked OnDangerEnd: %d | %d\n", dangerEndPreId, dangerEndPostId))
+            print(string.format("[ParryIndicator] Hooked OnDangerEnd: %d | %d\n", dangerEndPreId, dangerEndPostId))
         end
 
         hooking = false
@@ -323,7 +321,7 @@ local function ParryIndicatorHook()
     end
 
     hooking = false
-    print("Load ParryIndicator failed!\n")
+    print("[ParryIndicator] Load ParryIndicator failed!\n")
     return false
 end
 
@@ -331,7 +329,7 @@ ExecuteInGameThreadWithDelay(1000, function()
     ParryIndicatorHook()
 end)
 
-local function ResolveSealTimings()
+ResolveSealTimings = function()
     local playerController = UEHelpers.GetPlayerController()
     if not is_valid(playerController) then
         return false
@@ -370,6 +368,7 @@ local function ResolveSealTimings()
             if delay ~= nil and window ~= nil then
                 castDelay = delay
                 guardWindow = window
+                print(string.format("[ParryIndicator] Resolved seal timings: castDelay=%f, guardWindow=%f\n", castDelay, guardWindow))
                 return true
             end
         end
@@ -378,25 +377,89 @@ local function ResolveSealTimings()
     return false
 end
 
--- Resolved lazily from the hook instead of a timer; retried sparsely so a missing seal can't hammer the API.
-local resolveCountdown = 0
-EnsureTimings = function()
-    if castDelay ~= nil and guardWindow ~= nil then
+-- Equip/seal-swap happens in the WBP_MGT_ChangeEquipment menu; re-resolve only when that menu actually closes instead of polling on a timer.
+-- The class only exists in memory once the menu has been opened at least once, so retry hooking it until that succeeds.
+local menuClosePreId = nil
+local menuClosePostId = nil
+local menuCloseHookRunning = false
+
+local function TryHookMenuClose()
+    if menuClosePreId ~= nil then
         return true
     end
 
-    if resolveCountdown > 0 then
-        resolveCountdown = resolveCountdown - 1
+    local widget = FindFirstOf("WBP_MGT_ChangeEquipment_C")
+    if not is_valid(widget) then
         return false
     end
-    resolveCountdown = 60
 
-    if ResolveSealTimings() then
-        print(string.format("[ParryIndicator] castDelay: %f | guardWindow: %f\n", castDelay, guardWindow))
+    local klass = widget:GetClass()
+    if not is_valid(klass) then
+        return false
+    end
+
+    local ok, fullName = pcall(function()
+        return klass:GetFullName()
+    end)
+    if not ok or type(fullName) ~= "string" then
+        return false
+    end
+
+    local classPath = fullName:match("^%S+%s+(.+)$")
+    if not classPath then
+        return false
+    end
+
+    local hOk, hP, hQ = pcall(function()
+        return RegisterHook(classPath .. ":OnMenuClose", function(_)
+            ResolveSealTimings()
+        end)
+    end)
+
+    if hOk and hP ~= nil then
+        menuClosePreId = hP
+        menuClosePostId = hQ
+        print(string.format("[ParryIndicator] Hooked OnMenuClose: %d | %d\n", menuClosePreId, menuClosePostId))
         return true
     end
 
     return false
+end
+
+local function MenuCloseHookLoop()
+    if TryHookMenuClose() then
+        menuCloseHookRunning = false
+        return
+    end
+
+    ExecuteInGameThreadWithDelay(2000, MenuCloseHookLoop)
+end
+
+local function StartMenuCloseHookLoop()
+    if menuCloseHookRunning or menuClosePreId ~= nil then
+        return
+    end
+    menuCloseHookRunning = true
+    MenuCloseHookLoop()
+end
+
+-- Retries ResolveSealTimings on a short interval only until the initial seal is found, then stops until the next ClientRestart.
+local sealResolveRunning = false
+local function SealResolveLoop()
+    if (castDelay ~= nil and guardWindow ~= nil) or ResolveSealTimings() then
+        sealResolveRunning = false
+        return
+    end
+
+    ExecuteInGameThreadWithDelay(1000, SealResolveLoop)
+end
+
+local function StartSealResolveLoop()
+    if sealResolveRunning then
+        return
+    end
+    sealResolveRunning = true
+    SealResolveLoop()
 end
 
 local loopRunning = false
@@ -419,15 +482,18 @@ local function StartCheckLoop()
 end
 
 StartCheckLoop()
+StartMenuCloseHookLoop()
+StartSealResolveLoop()
 
 RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
     ParryIndicatorHook()
     castDelay = nil
     guardWindow = nil
-    resolveCountdown = 0
     activeIndicators = {}
     activeDangers = {}
     lastMontage = {}
     windowCache = {}
     StartCheckLoop()
+    StartMenuCloseHookLoop()
+    StartSealResolveLoop()
 end)
