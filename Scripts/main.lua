@@ -47,10 +47,23 @@ local function getHitCheckWindows(montage)
 end
 
 local activeIndicators = {}
+-- Keyed by animation instance address; latched true for the montage's whole playback once a danger notify fires (not cleared on NotifyEnd) so later HitCheck windows in the same animation stay unparryable.
+local activeDangers = {}
+-- Keyed by enemy address; used to detect when an enemy moves on to a new montage so the old montage's danger flag can be freed.
+local lastMontage = {}
 local castDelay = nil
 local guardWindow = nil
 local EnsureTimings = nil
 local socketTarget = nil
+local noneSocket = nil
+
+local function ForgetMontage(enemyId)
+    local previous = lastMontage[enemyId]
+    if previous ~= nil then
+        activeDangers[previous] = nil
+        lastMontage[enemyId] = nil
+    end
+end
 
 local function CalcParryWindow(self)
     if castDelay == nil or guardWindow == nil then
@@ -72,17 +85,26 @@ local function CalcParryWindow(self)
     local animInstance = enemy:GetAnimInstance()
     if not animInstance:IsValid() then
         activeIndicators[enemyId] = nil
+        ForgetMontage(enemyId)
         return
     end
 
     local montage = animInstance:GetCurrentActiveMontage()
     if not montage:IsValid() then
         activeIndicators[enemyId] = nil
+        ForgetMontage(enemyId)
         return
+    end
+
+    local montageAddr = montage:GetAddress()
+    if lastMontage[enemyId] ~= montageAddr then
+        ForgetMontage(enemyId)
+        lastMontage[enemyId] = montageAddr
     end
 
     local position = animInstance:Montage_GetPosition(montage)
     local windows = getHitCheckWindows(montage)
+    local isDanger = activeDangers[montageAddr] or false
 
     local inWindow = false
     for _, w in ipairs(windows) do
@@ -99,7 +121,12 @@ local function CalcParryWindow(self)
         local widget = enemy['Enemy Health Widget']
         if is_valid(widget) then
             socketTarget = socketTarget or FName("Socket_Target")
-            widget:SpawnParryableAttackIndicator(socketTarget)
+            if isDanger then
+                noneSocket = noneSocket or FName("None")
+                widget:SpawnWarningIndicator(socketTarget, false, noneSocket)
+            else
+                widget:SpawnParryableAttackIndicator(socketTarget)
+            end
             activeIndicators[enemyId] = enemy
         end
     elseif not inWindow and existing ~= nil then
@@ -145,6 +172,10 @@ end
 
 local preId = nil
 local postId = nil
+local dangerStartPreId = nil
+local dangerStartPostId = nil
+local dangerEndPreId = nil
+local dangerEndPostId = nil
 local hooking = false
 
 local blockDurationMagnitude = nil
@@ -160,6 +191,24 @@ local function ParryIndicatorUnHook()
     end
     preId = nil
     postId = nil
+
+    if dangerStartPreId ~= nil or dangerStartPostId ~= nil then
+        pcall(UnregisterHook,
+            "/Game/Sparta/Core/Animations/ANS/ANS_UnparryableAttackWarning.ANS_UnparryableAttackWarning_C:Received_NotifyBegin",
+            dangerStartPreId, dangerStartPostId)
+    end
+    dangerStartPreId = nil
+    dangerStartPostId = nil
+
+    if dangerEndPreId ~= nil or dangerEndPostId ~= nil then
+        pcall(UnregisterHook,
+            "/Game/Sparta/Core/Animations/ANS/ANS_UnparryableAttackWarning.ANS_UnparryableAttackWarning_C:Received_NotifyEnd",
+            dangerEndPreId, dangerEndPostId)
+    end
+    dangerEndPreId = nil
+    dangerEndPostId = nil
+    activeDangers = {}
+    lastMontage = {}
 
     blockDurationMagnitude = nil
     hardenPerfectStoneFormDuration = nil
@@ -235,14 +284,45 @@ local function ParryIndicatorHook()
             "/Game/Sparta/Core/AI/Components/BPC_AttackWarningInvoker.BPC_AttackWarningInvoker_C:UpdateAttackWarning",
             CalcParryWindow)
     end)
-    hooking = false
 
     if ok and p ~= nil then
         preId = p
         postId = q
         print(string.format("Load ParryIndicator successfully! preId: %d | postId: %d\n", preId, postId))
+
+        local dsOk, dsP, dsQ = pcall(function()
+            return RegisterHook(
+                "/Game/Sparta/Core/Animations/ANS/ANS_UnparryableAttackWarning.ANS_UnparryableAttackWarning_C:Received_NotifyBegin",
+                function(_, _, Animation)
+                    local animation = Animation:get()
+                    if is_valid(animation) then
+                        activeDangers[animation:GetAddress()] = true
+                    end
+                end)
+        end)
+        if dsOk and dsP ~= nil then
+            dangerStartPreId = dsP
+            dangerStartPostId = dsQ
+            print(string.format("Hooked OnDangerStart: %d | %d\n", dangerStartPreId, dangerStartPostId))
+        end
+
+        -- NotifyEnd intentionally does not clear activeDangers: the flag stays latched for the rest of the montage's playback.
+        local deOk, deP, deQ = pcall(function()
+            return RegisterHook(
+                "/Game/Sparta/Core/Animations/ANS/ANS_UnparryableAttackWarning.ANS_UnparryableAttackWarning_C:Received_NotifyEnd",
+                function(_, _, Animation) end)
+        end)
+        if deOk and deP ~= nil then
+            dangerEndPreId = deP
+            dangerEndPostId = deQ
+            print(string.format("Hooked OnDangerEnd: %d | %d\n", dangerEndPreId, dangerEndPostId))
+        end
+
+        hooking = false
         return true
     end
+
+    hooking = false
     print("Load ParryIndicator failed!\n")
     return false
 end
@@ -346,6 +426,8 @@ RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
     guardWindow = nil
     resolveCountdown = 0
     activeIndicators = {}
+    activeDangers = {}
+    lastMontage = {}
     windowCache = {}
     StartCheckLoop()
 end)
