@@ -1,0 +1,34 @@
+name: Package and Release Scripts
+
+on:
+  push:
+    branches:
+      - main  # Change to master or your primary branch if different
+    paths:
+      - 'Scripts/**'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Zip Archive
+        run: |
+          mkdir ParryIndicator
+          cp -r Scripts/* ParryIndicator/
+          cp enabled.txt ParryIndicator/
+          zip -r ParryIndicatorMk2.zip ParryIndicator
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-${{ github.sha }}
+          name: Release ${{ github.sha }}
+          draft: false
+          prerelease: false
+          files: ParryIndicatorMk2.zip
