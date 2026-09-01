@@ -3,13 +3,13 @@ local Config = {}
 -- Completely disables parry indicators for all enemies, but not rumble or danger indicators
 Config.disableParryIndicators = false
 
--- Disables parry indicators only when the player is locked on to a target, but not rumble or danger indicators
+-- Disables parry indicators for the lock-on target only, but other enemies will retain theirs
 Config.disbaleParryIndicatorsOnLockOnly = false
 
 -- Disables the additional unparryable indicator (Note: The in game's warning indicator will still appear)
 Config.disableDangerIndicators = false
 
--- Disables rumble indicators. Note: Rumble only occurs when the player is locked on to a target, and the enemy is in a parryable state.
+-- Disables rumble indicators. Note: Rumble only occurs when the player is locked on to the target and the enemy is in a parryable state.
 Config.disableRumbleIndicators = false
 
 -- Rumble Settings
