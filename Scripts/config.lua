@@ -1,15 +1,23 @@
 local Config = {}
 
+-- Completely disables parry indicators for all enemies, but not rumble or danger indicators
 Config.disableParryIndicators = false
+
+-- Disables parry indicators only when the player is locked on to a target, but not rumble or danger indicators
 Config.disbaleParryIndicatorsOnLockOnly = false
+
+-- Disables the additional unparryable indicator (Note: The in game's warning indicator will still appear)
 Config.disableDangerIndicators = false
+
+-- Disables rumble indicators. Note: Rumble only occurs when the player is locked on to a target, and the enemy is in a parryable state.
 Config.disableRumbleIndicators = false
 
-Config.rumbleDuration = 1.0
-Config.rumbleStrength = 0.1
-Config.rumbleUseLeftLargeMotor = true
-Config.rumbleUseLeftSmallMotor = true
-Config.rumbleUseRightLargeMotor = true
-Config.rumbleUseRightSmallMotor = true
+-- Rumble Settings
+Config.rumbleDuration = 1.0                 -- The duration of the rumble, in seconds
+Config.rumbleStrength = 0.1                 -- The strength of the rumble, from 0.0 to 1.0
+Config.rumbleUseLeftLargeMotor = true       -- Whether to use the left large motor for rumble
+Config.rumbleUseLeftSmallMotor = true       -- Whether to use the left small motor for rumble
+Config.rumbleUseRightLargeMotor = true      -- Whether to use the right large motor for rumble
+Config.rumbleUseRightSmallMotor = true      -- Whether to use the right small motor for rumble
 
 return Config
