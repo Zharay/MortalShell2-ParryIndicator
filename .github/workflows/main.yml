@@ -6,6 +6,7 @@ on:
       - main  # Change to master or your primary branch if different
     paths:
       - 'Scripts/**'
+      - '.github/workflows/main.yml'
 
 jobs:
   build-and-release:
@@ -19,8 +20,8 @@ jobs:
 
       - name: Create Zip Archive
         run: |
-          mkdir ParryIndicator
-          cp -r Scripts/* ParryIndicator/
+          mkdir -p ParryIndicator/Scripts
+          cp -r Scripts/. ParryIndicator/Scripts/
           cp enabled.txt ParryIndicator/
           zip -r ParryIndicatorMk2.zip ParryIndicator
 
