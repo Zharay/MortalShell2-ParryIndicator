@@ -14,7 +14,7 @@ Config.disableRumbleIndicators = false
 
 -- Rumble Settings
 Config.rumbleDuration = 1.0                 -- The duration of the rumble, in seconds
-Config.rumbleStrength = 0.1                 -- The strength of the rumble, from 0.0 to 1.0
+Config.rumbleStrength = 0.1                 -- The strength of the rumble, from 0.0 to 1.0 (Recommend 0.1 to 0.3 for a subtle effect)
 Config.rumbleUseLeftLargeMotor = true       -- Whether to use the left large motor for rumble
 Config.rumbleUseLeftSmallMotor = true       -- Whether to use the left small motor for rumble
 Config.rumbleUseRightLargeMotor = true      -- Whether to use the right large motor for rumble
