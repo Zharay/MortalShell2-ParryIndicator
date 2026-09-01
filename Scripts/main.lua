@@ -1,4 +1,5 @@
 local UEHelpers = require("UEHelpers")
+local Config = require("config")
 
 local function is_valid(object)
     if not object then
@@ -56,6 +57,32 @@ local guardWindow = nil
 local ResolveSealTimings = nil
 local socketTarget = nil
 local noneSocket = nil
+local currentAimTarget = nil
+
+local function IsCurrentLockOnTarget(enemy)
+    return is_valid(currentAimTarget) and currentAimTarget:GetAddress() == enemy:GetAddress()
+end
+
+local function PlayParryTargetRumble()
+    if Config.disableRumbleIndicators then
+        return
+    end
+
+    local playerController = UEHelpers.GetPlayerController()
+    if not is_valid(playerController) then
+        return
+    end
+
+    local latentInfo = {
+        Linkage = 0,
+        UUID = -1,
+        ExecutionFunction = FName(""),
+        CallbackTarget = playerController
+    }
+    playerController:PlayDynamicForceFeedback(Config.rumbleDuration, Config.rumbleStrength,
+        Config.rumbleUseLeftLargeMotor, Config.rumbleUseLeftSmallMotor,
+        Config.rumbleUseRightLargeMotor, Config.rumbleUseRightSmallMotor, 0, latentInfo)
+end
 
 local function ForgetMontage(enemyId)
     local previous = lastMontage[enemyId]
@@ -119,11 +146,20 @@ local function CalcParryWindow(self)
         local widget = enemy['Enemy Health Widget']
         if is_valid(widget) then
             socketTarget = socketTarget or FName("Socket_Target")
+            local isLockOnTarget = IsCurrentLockOnTarget(enemy)
             if isDanger then
-                noneSocket = noneSocket or FName("None")
-                widget:SpawnWarningIndicator(socketTarget, false, noneSocket)
+                if not Config.disableDangerIndicators then
+                    noneSocket = noneSocket or FName("None")
+                    widget:SpawnWarningIndicator(socketTarget, false, noneSocket)
+                end
             else
-                widget:SpawnParryableAttackIndicator(socketTarget)
+                if not Config.disableParryIndicators and
+                    not (Config.disbaleParryIndicatorsOnLockOnly and isLockOnTarget) then
+                    widget:SpawnParryableAttackIndicator(socketTarget)
+                end
+                if isLockOnTarget then
+                    PlayParryTargetRumble()
+                end
             end
             activeIndicators[enemyId] = enemy
         end
@@ -174,6 +210,12 @@ local dangerStartPreId = nil
 local dangerStartPostId = nil
 local dangerEndPreId = nil
 local dangerEndPostId = nil
+local aimTargetPreId = nil
+local aimTargetPostId = nil
+local aimTargetAssetPath = "/Game/Sparta/Core/Player/Components/BPC_Player_SoftTargeting.BPC_Player_SoftTargeting"
+local aimTargetClassPath = aimTargetAssetPath .. "_C"
+local aimTargetAssetLoadAttempted = false
+local aimTargetHookRunning = false
 local hooking = false
 
 local blockDurationMagnitude = nil
@@ -181,7 +223,17 @@ local hardenPerfectStoneFormDuration = nil
 local parryLinkValue = nil
 local parryDuration = nil
 
-local function ParryIndicatorUnHook()
+local function UnhookAimTarget()
+    if aimTargetClassPath ~= nil and (aimTargetPreId ~= nil or aimTargetPostId ~= nil) then
+        pcall(UnregisterHook, aimTargetClassPath .. ":Update Aim Target", aimTargetPreId, aimTargetPostId)
+    end
+    aimTargetPreId = nil
+    aimTargetPostId = nil
+    aimTargetHookRunning = false
+    currentAimTarget = nil
+end
+
+local function ParryIndicatorUnHook(keepAimTargetHook)
     if preId ~= nil or postId ~= nil then
         pcall(UnregisterHook,
             "/Game/Sparta/Core/AI/Components/BPC_AttackWarningInvoker.BPC_AttackWarningInvoker_C:UpdateAttackWarning",
@@ -205,6 +257,9 @@ local function ParryIndicatorUnHook()
     end
     dangerEndPreId = nil
     dangerEndPostId = nil
+    if not keepAimTargetHook then
+        UnhookAimTarget()
+    end
     activeDangers = {}
     lastMontage = {}
 
@@ -220,7 +275,7 @@ local function ParryIndicatorHook()
     end
     hooking = true
 
-    ParryIndicatorUnHook()
+    ParryIndicatorUnHook(true)
 
     local pfb_2, pfbErr_2 = LoadClassDefault(
         "/Game/Sparta/Core/Effects/GE_ActiveBlock_PerfectBlock.GE_ActiveBlock_PerfectBlock",
@@ -231,7 +286,7 @@ local function ParryIndicatorHook()
         blockDurationMagnitude = pfb_2.DurationMagnitude.ScalableFloatMagnitude.Value
     else
         print("[ParryIndicator] Can't get PerfectBlock.DurationMagnitude: " .. tostring(pfbErr_2))
-        blockDurationMagnitude = nil
+        blockDurationMagnitude = 0.3
     end
 
     local hardenBl, hardenBlErr = LoadClassDefault(
@@ -242,7 +297,7 @@ local function ParryIndicatorHook()
         hardenPerfectStoneFormDuration = hardenBl.PerfectStoneFormDuration
     else
         print("[ParryIndicator] Can't get HardenBlock.PerfectStoneFormDuration: " .. tostring(hardenBlErr))
-        hardenPerfectStoneFormDuration = nil
+        hardenPerfectStoneFormDuration = 0.25
     end
 
     local montage_path_1 =
@@ -269,8 +324,8 @@ local function ParryIndicatorHook()
 
         if not parry then
             print("[ParryIndicator] Can't get Parry.LinkValue & Parry.Duration: " .. tostring(parryErr))
-            parryLinkValue = nil
-            parryDuration = nil
+            parryLinkValue = 0.105
+            parryDuration = 0.277
         else
             print(string.format("[ParryIndicator] Parry.LinkValue: %f\n", parryLinkValue))
             print(string.format("[ParryIndicator] Parry.Duration: %f\n", parryDuration))
@@ -377,41 +432,33 @@ ResolveSealTimings = function()
     return false
 end
 
--- Equip/seal-swap happens in the WBP_MGT_ChangeEquipment menu; re-resolve only when that menu actually closes instead of polling on a timer.
--- The class only exists in memory once the menu has been opened at least once, so retry hooking it until that succeeds.
+-- Equip/seal-swap happens in the WBP_MGT_ChangeEquipment menu; re-resolve only when that menu actually closes
 local menuClosePreId = nil
 local menuClosePostId = nil
 local menuCloseHookRunning = false
+local menuCloseAssetPath = "/Game/Sparta/UI/Menu/LandingArea/WBP_MGT_ChangeEquipment.WBP_MGT_ChangeEquipment"
+local menuCloseClassPath = menuCloseAssetPath .. "_C"
+local menuCloseAssetLoadAttempted = false
 
 local function TryHookMenuClose()
     if menuClosePreId ~= nil then
         return true
     end
 
-    local widget = FindFirstOf("WBP_MGT_ChangeEquipment_C")
-    if not is_valid(widget) then
-        return false
+    if not menuCloseAssetLoadAttempted then
+        menuCloseAssetLoadAttempted = true
+        pcall(function()
+            LoadAsset(menuCloseAssetPath)
+        end)
     end
 
-    local klass = widget:GetClass()
+    local klass = StaticFindObject(menuCloseClassPath)
     if not is_valid(klass) then
         return false
     end
 
-    local ok, fullName = pcall(function()
-        return klass:GetFullName()
-    end)
-    if not ok or type(fullName) ~= "string" then
-        return false
-    end
-
-    local classPath = fullName:match("^%S+%s+(.+)$")
-    if not classPath then
-        return false
-    end
-
     local hOk, hP, hQ = pcall(function()
-        return RegisterHook(classPath .. ":OnMenuClose", function(_)
+        return RegisterHook(menuCloseClassPath .. ":OnMenuClose", function(_)
             ResolveSealTimings()
         end)
     end)
@@ -432,7 +479,7 @@ local function MenuCloseHookLoop()
         return
     end
 
-    ExecuteInGameThreadWithDelay(2000, MenuCloseHookLoop)
+    ExecuteInGameThreadWithDelay(5000, MenuCloseHookLoop)
 end
 
 local function StartMenuCloseHookLoop()
@@ -451,7 +498,7 @@ local function SealResolveLoop()
         return
     end
 
-    ExecuteInGameThreadWithDelay(1000, SealResolveLoop)
+    ExecuteInGameThreadWithDelay(5000, SealResolveLoop)
 end
 
 local function StartSealResolveLoop()
@@ -460,6 +507,61 @@ local function StartSealResolveLoop()
     end
     sealResolveRunning = true
     SealResolveLoop()
+end
+
+local function TryHookAimTarget()
+    if aimTargetPreId ~= nil then
+        return true
+    end
+
+    if not aimTargetAssetLoadAttempted then
+        aimTargetAssetLoadAttempted = true
+        pcall(function()
+            LoadAsset(aimTargetAssetPath)
+        end)
+    end
+
+    local klass = StaticFindObject(aimTargetClassPath)
+    if not is_valid(klass) then
+        return false
+    end
+
+    local hOk, hP, hQ = pcall(function()
+        return RegisterHook(aimTargetClassPath .. ":Update Aim Target", function(_, AimTarget)
+            local actor = AimTarget:get()
+            if is_valid(actor) then
+                currentAimTarget = actor
+            else
+                currentAimTarget = nil
+            end
+        end)
+    end)
+
+    if hOk and hP ~= nil then
+        aimTargetPreId = hP
+        aimTargetPostId = hQ
+        print(string.format("[ParryIndicator] Hooked Update Aim Target: %d | %d\n", aimTargetPreId, aimTargetPostId))
+        return true
+    end
+
+    return false
+end
+
+local function AimTargetHookLoop()
+    if TryHookAimTarget() then
+        aimTargetHookRunning = false
+        return
+    end
+
+    ExecuteInGameThreadWithDelay(1000, AimTargetHookLoop)
+end
+
+local function StartAimTargetHookLoop()
+    if aimTargetHookRunning or aimTargetPreId ~= nil then
+        return
+    end
+    aimTargetHookRunning = true
+    AimTargetHookLoop()
 end
 
 local loopRunning = false
@@ -484,8 +586,10 @@ end
 StartCheckLoop()
 StartMenuCloseHookLoop()
 StartSealResolveLoop()
+StartAimTargetHookLoop()
 
 RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
+    UnhookAimTarget()
     ParryIndicatorHook()
     castDelay = nil
     guardWindow = nil
@@ -496,4 +600,5 @@ RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
     StartCheckLoop()
     StartMenuCloseHookLoop()
     StartSealResolveLoop()
+    StartAimTargetHookLoop()
 end)
