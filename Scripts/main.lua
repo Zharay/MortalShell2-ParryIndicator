@@ -223,6 +223,9 @@ local hardenPerfectStoneFormDuration = nil
 local parryLinkValue = nil
 local parryDuration = nil
 
+-- Set by ModRef.OnUnload; stops the self-rescheduling loops from queuing further delayed actions.
+local isShuttingDown = false
+
 local function UnhookAimTarget()
     if aimTargetClassPath ~= nil and (aimTargetPreId ~= nil or aimTargetPostId ~= nil) then
         pcall(UnregisterHook, aimTargetClassPath .. ":Update Aim Target", aimTargetPreId, aimTargetPostId)
@@ -440,6 +443,15 @@ local menuCloseAssetPath = "/Game/Sparta/UI/Menu/LandingArea/WBP_MGT_ChangeEquip
 local menuCloseClassPath = menuCloseAssetPath .. "_C"
 local menuCloseAssetLoadAttempted = false
 
+local function UnhookMenuClose()
+    if menuClosePreId ~= nil or menuClosePostId ~= nil then
+        pcall(UnregisterHook, menuCloseClassPath .. ":OnMenuClose", menuClosePreId, menuClosePostId)
+    end
+    menuClosePreId = nil
+    menuClosePostId = nil
+    menuCloseHookRunning = false
+end
+
 local function TryHookMenuClose()
     if menuClosePreId ~= nil then
         return true
@@ -474,6 +486,11 @@ local function TryHookMenuClose()
 end
 
 local function MenuCloseHookLoop()
+    if isShuttingDown then
+        menuCloseHookRunning = false
+        return
+    end
+
     if TryHookMenuClose() then
         menuCloseHookRunning = false
         return
@@ -483,7 +500,7 @@ local function MenuCloseHookLoop()
 end
 
 local function StartMenuCloseHookLoop()
-    if menuCloseHookRunning or menuClosePreId ~= nil then
+    if isShuttingDown or menuCloseHookRunning or menuClosePreId ~= nil then
         return
     end
     menuCloseHookRunning = true
@@ -493,6 +510,11 @@ end
 -- Retries ResolveSealTimings on a short interval only until the initial seal is found, then stops until the next ClientRestart.
 local sealResolveRunning = false
 local function SealResolveLoop()
+    if isShuttingDown then
+        sealResolveRunning = false
+        return
+    end
+
     if (castDelay ~= nil and guardWindow ~= nil) or ResolveSealTimings() then
         sealResolveRunning = false
         return
@@ -502,7 +524,7 @@ local function SealResolveLoop()
 end
 
 local function StartSealResolveLoop()
-    if sealResolveRunning then
+    if isShuttingDown or sealResolveRunning then
         return
     end
     sealResolveRunning = true
@@ -548,6 +570,11 @@ local function TryHookAimTarget()
 end
 
 local function AimTargetHookLoop()
+    if isShuttingDown then
+        aimTargetHookRunning = false
+        return
+    end
+
     if TryHookAimTarget() then
         aimTargetHookRunning = false
         return
@@ -557,7 +584,7 @@ local function AimTargetHookLoop()
 end
 
 local function StartAimTargetHookLoop()
-    if aimTargetHookRunning or aimTargetPreId ~= nil then
+    if isShuttingDown or aimTargetHookRunning or aimTargetPreId ~= nil then
         return
     end
     aimTargetHookRunning = true
@@ -566,6 +593,11 @@ end
 
 local loopRunning = false
 local function CheckLoop()
+    if isShuttingDown then
+        loopRunning = false
+        return
+    end
+
     if preId ~= nil then
         loopRunning = false
         return
@@ -576,7 +608,7 @@ local function CheckLoop()
 end
 
 local function StartCheckLoop()
-    if loopRunning then
+    if isShuttingDown or loopRunning then
         return
     end
     loopRunning = true
@@ -588,7 +620,11 @@ StartMenuCloseHookLoop()
 StartSealResolveLoop()
 StartAimTargetHookLoop()
 
-RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
+local clientRestartPreId, clientRestartPostId = RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
+    if isShuttingDown then
+        return
+    end
+
     UnhookAimTarget()
     ParryIndicatorHook()
     castDelay = nil
@@ -602,3 +638,19 @@ RegisterHook("/Script/Engine.PlayerController:ClientRestart", function()
     StartSealResolveLoop()
     StartAimTargetHookLoop()
 end)
+
+-- Runs right before the mod is unloaded (game shutdown or hot-reload); tears down every hook/timer so none can fire on a dying UWorld.
+ModRef.OnUnload = function()
+    isShuttingDown = true
+
+    ClearAllDelayedActions()
+
+    ParryIndicatorUnHook(false)
+    UnhookMenuClose()
+
+    if clientRestartPreId ~= nil or clientRestartPostId ~= nil then
+        pcall(UnregisterHook, "/Script/Engine.PlayerController:ClientRestart", clientRestartPreId, clientRestartPostId)
+    end
+
+    print("[ParryIndicator] Mod is unloading, all hooks and timers cleared.\n")
+end
