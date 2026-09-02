@@ -25,15 +25,11 @@ jobs:
           cp enabled.txt ParryIndicator/
           zip -r ParryIndicatorMk2.zip ParryIndicator
 
-      - name: Set release version
-        id: release_version
-        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: release-${{ steps.release_version.outputs.short_sha }}
-          name: Release ${{ steps.release_version.outputs.short_sha }}
+          tag_name: v1.2.${{ github.run_number }}
+          name: Release ${{ steps.vars.outputs.tag_date }}
           draft: false
           prerelease: false
           files: ParryIndicatorMk2.zip

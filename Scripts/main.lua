@@ -435,11 +435,11 @@ ResolveSealTimings = function()
     return false
 end
 
--- Equip/seal-swap happens in the WBP_MGT_ChangeEquipment menu; re-resolve only when that menu actually closes
+-- Equip/seal-swap happens in the WBP_MGT_Character menu; re-resolve only when that menu actually closes
 local menuClosePreId = nil
 local menuClosePostId = nil
 local menuCloseHookRunning = false
-local menuCloseAssetPath = "/Game/Sparta/UI/Menu/LandingArea/WBP_MGT_ChangeEquipment.WBP_MGT_ChangeEquipment"
+local menuCloseAssetPath = "/Game/Sparta/UI/Menu/WBP_MGT_Character.WBP_MGT_Character"
 local menuCloseClassPath = menuCloseAssetPath .. "_C"
 local menuCloseAssetLoadAttempted = false
 
@@ -496,7 +496,7 @@ local function MenuCloseHookLoop()
         return
     end
 
-    ExecuteInGameThreadWithDelay(5000, MenuCloseHookLoop)
+    ExecuteInGameThreadWithDelay(2500, MenuCloseHookLoop)
 end
 
 local function StartMenuCloseHookLoop()
@@ -520,7 +520,7 @@ local function SealResolveLoop()
         return
     end
 
-    ExecuteInGameThreadWithDelay(5000, SealResolveLoop)
+    ExecuteInGameThreadWithDelay(2500, SealResolveLoop)
 end
 
 local function StartSealResolveLoop()
